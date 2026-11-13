@@ -104,6 +104,9 @@ fieldset.grp button{justify-self:start}
 .out{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;background:var(--white);border:2px solid var(--ink);border-top:0;padding:8px;min-width:0}
 #status{flex:none;display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;margin:0 0 8px}
 #status[hidden]{display:none}
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:20;background:var(--ink);color:var(--white);padding:8px 14px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.on{opacity:1}
+#toast.warn{background:var(--red)}
 #status .sl{white-space:pre-line}
 #status .sr{margin-left:auto;text-align:right}
 #status.warn{color:var(--red)}
@@ -158,9 +161,9 @@ fieldset.grp button{justify-self:start}
       <p>A free STL to PDF converter. It prints the side views of a 3D model (binary or ASCII STL) to a PDF at 1:1 scale on A4, A3 or Letter, so you can check the size and shape on paper before printing in plastic. Your STL file is processed in your browser and is never uploaded.</p>
       <h2>How to use</h2>
       <ul>
-        <li><b>Load:</b> press Load STL, or drop an .stl file anywhere on the page. The three views of the cube appear automatically. Set the units of the file in More settings.</li>
+        <li><b>Load:</b> press Load STL, or drop an .stl file anywhere on the page. The three views of the cube appear automatically; press the cube to show the three views of another side. Set the units of the file in More settings.</li>
                 <li><b>Auto:</b> Orientation Auto picks portrait or landscape, whichever needs fewer pages.</li>
-        <li><b>Remove a view:</b> press the large X in the top right corner of its frame. If you remove all views, press the cube to add its three views again.</li>
+        <li><b>Remove a view:</b> press the large X in the top right corner of its frame. If you remove all views, press the cube to show its three views again.</li>
         <li><b>Switch to opposite:</b> press the arrow in the top left corner of its frame. The ⟳ button switches all views.</li>
         <li><b>Pages:</b> when the views need more than one sheet, neighbouring pages overlap by 10 mm. Align the matching lines and tape them.</li>
         <li><b>Paper:</b> choose A4, A3 or Letter in the top bar. Print at 100% / actual size.</li>
@@ -239,6 +242,7 @@ fieldset.grp button{justify-self:start}
     <span class="row"><a class="btn" href="https://buymeacoffee.com/drozdovlevh" target="_blank" rel="noopener">Buy me a coffee</a><button type="button" id="donateHide">Hide</button></span>
   </div>
   <div id="status"></div>
+  <div id="toast" role="status"></div>
   <div id="hint"><span id="hintText"></span><button id="hintBtn">Switch</button></div>
   <div id="pwrap"><div id="preview"></div></div>
 </section>
@@ -818,6 +822,13 @@ function alignSep(){
   const mid = (cube.getBoundingClientRect().right + rot.getBoundingClientRect().left) / 2;
   sum.style.setProperty("--sepx", (mid - sum.getBoundingClientRect().left).toFixed(1) + "px");
 }
+function flash(html, warn){
+  const t = $("toast");
+  t.innerHTML = html;
+  t.className = "on" + (warn ? " warn" : "");
+  clearTimeout(flash.timer);
+  flash.timer = setTimeout(() => { t.className = ""; }, 2600);
+}
 function setHead(html){ $("sumStatus").innerHTML = html; }
 function setStatus(html, warn, right){
   const st = $("status");
@@ -836,19 +847,16 @@ function commit(next){
 }
 
 function undo(){
-  if (!history.length){ setStatus("Nothing to undo", false); return; }
+  if (!history.length){ flash("Nothing to undo", false); return; }
   selected = history.pop();
   refresh();
 }
 
 // cube: add the three views of the current side (up to 6 in total)
 function clickCube(){
-  const add = sideViews().filter(v => !selected.includes(v));
-  if (!add.length){ setStatus("These three views are already selected", false); return; }
-  const room = MAX_VIEWS - selected.length;
-  if (room <= 0){ setStatus(`Maximum ${MAX_VIEWS} views. Remove one first.`, true); return; }
-  if (add.length > room) setStatus(`Only ${room} more view${room > 1 ? "s" : ""} fit (maximum ${MAX_VIEWS}).`, true);
-  commit(selected.concat(add.slice(0, room)));
+  const next = sideViews();
+  if (next.length === selected.length && next.every(v => selected.includes(v))){ flash("These three views are already shown", false); return; }
+  commit(next);   // the cube shows exactly the three views of its side
 }
 
 function removeView(name){
@@ -863,10 +871,10 @@ function swapView(name){
 
 function addAngle(){
   const a = parseFloat($("ang").value);
-  if (!(a >= 0 && a < 360)){ setStatus("Angle must be between 0 and 359.9", true); return; }
+  if (!(a >= 0 && a < 360)){ flash("Angle must be between 0 and 359.9", true); return; }
   const name = `${+a.toFixed(1)}deg`;
-  if (selected.includes(name)){ setStatus(`${esc(name)} is already selected`, true); return; }
-  if (selected.length >= MAX_VIEWS){ setStatus(`Maximum ${MAX_VIEWS} views. Remove one first.`, true); return; }
+  if (selected.includes(name)){ flash(`${esc(name)} is already selected`, true); return; }
+  if (selected.length >= MAX_VIEWS){ flash(`Maximum ${MAX_VIEWS} views. Remove one first.`, true); return; }
   commit(selected.concat([name]));
 }
 
@@ -883,7 +891,7 @@ function applyLoadDefaults(){
 function rotateAll(){
   const svg = $("cube");
   if (svg.classList.contains("spin")) return;
-  if (!selected.length){ setStatus("No views selected", false); return; }
+  if (!selected.length){ flash("No views selected", false); return; }
   commit(selected.map(oppOf));
   svg.classList.add("spin");
   svg.addEventListener("animationend", () => {
