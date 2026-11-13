@@ -1,0 +1,1077 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>STL to PDF at 1:1</title>
+<meta name="description" content="Print the side views of an STL 3D model to a PDF at 1:1 scale on A4, A3 or Letter. Free, runs in your browser, nothing is uploaded.">
+<meta name="keywords" content="stl to pdf, stl2pdf, print 2d from stl scale 1:1, fastest way to print stl side view to 2d in scale, stl side view to pdf, print 3d model actual size, 3d model life size print, stl silhouette pdf, stl to 2d drawing, 3d print size test">
+<meta property="og:title" content="STL to PDF at 1:1">
+<meta property="og:description" content="Print the side views of an STL model to PDF at 1:1 scale. Check size and shape on paper before you print.">
+<style>
+:root{--paper:#f1efe9;--ink:#111;--mute:#6b6862;--grid:#dcd8ce;--grid2:#c7c2b5;--white:#fff;--red:#d9472b;--stage:#e9e7e1;--bar:48px;--ctl:38px}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--paper:#151412;--ink:#ecebe6;--mute:#9d9a92;--grid:#22211d;--grid2:#312f29;--white:#1d1c19;--red:#ff7a5c;--stage:#100f0d;color-scheme:dark}}
+:root[data-theme="dark"]{--paper:#151412;--ink:#ecebe6;--mute:#9d9a92;--grid:#22211d;--grid2:#312f29;--white:#1d1c19;--red:#ff7a5c;--stage:#100f0d;color-scheme:dark}
+*{box-sizing:border-box;border-radius:0}
+html,body{margin:0}
+body{background-color:var(--paper);color:var(--ink);font:13px/1.45 ui-sans-serif,system-ui,Arial,sans-serif;min-height:100vh}
+/* decorative grid: 30% transparency */
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.7;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px),
+                   linear-gradient(var(--grid2) 1px,transparent 1px),linear-gradient(90deg,var(--grid2) 1px,transparent 1px);
+  background-size:16px 16px,16px 16px,96px 96px,96px 96px}
+main{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:12px 16px 16px;display:flex;flex-direction:column}
+.lbl{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+
+/* corner theme switches */
+.tg{position:fixed;width:12px;height:12px;padding:0;border:1px solid var(--ink);z-index:9}
+.tg.tl{top:12px;left:2px}.tg.tr{top:12px;right:2px}.tg.bl{bottom:16px;left:2px}.tg.br{bottom:16px;right:2px}
+.tg[data-t="auto"]{background:linear-gradient(90deg,#fff 50%,#111 50%)}
+.tg[data-t="light"]{background:#fff}
+.tg[data-t="dark"]{background:#111}
+
+/* top bar: one row. Controls are 80% of the bar height, Load STL fills the full height */
+.top{position:relative;display:flex;flex-wrap:wrap;align-items:center;background:var(--white);border:2px solid var(--ink);min-height:calc(var(--bar) + 4px)}
+.top>*{display:flex;align-items:center;gap:8px;padding:0 10px;border-right:1px solid var(--ink);height:var(--ctl)}
+.top>:last-child{border-right:0}
+.top>label.load{height:var(--bar);padding:0 10px}
+.brand{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700;font-size:13px;letter-spacing:.04em;padding:0 12px;overflow:hidden;white-space:nowrap}
+button,.btn{font:inherit;font-size:12px;height:34px;border:1px solid var(--ink);background:var(--white);color:var(--ink);padding:0 12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:4px;text-decoration:none}
+button:disabled{opacity:.3;cursor:default}
+.top>button{height:var(--ctl)}
+.cubebtn{width:var(--ctl);padding:4px}
+.cubebtn svg{width:100%;height:100%;display:block}
+.face{cursor:pointer}
+.face:hover{fill-opacity:.4 !important}
+.rot{width:var(--ctl);padding:0;font-size:22px;line-height:1}
+.spin{animation:spin .5s ease-in-out}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.spin{animation:none}}
+select,input[type=number]{font:inherit;font-size:12px;height:34px;padding:0 8px;border:1px solid var(--ink);background:var(--white);color:var(--ink)}
+.top select{height:var(--ctl)}
+input[type=number]{width:90px}
+input[type=checkbox]{margin:0;width:14px;height:14px;accent-color:var(--ink)}
+input[type=file]{font:inherit;font-size:12px;height:var(--ctl);padding:0;border:1px solid var(--ink);background:var(--white);color:var(--ink);width:390px;max-width:100%;margin:0}
+input[type=file]::file-selector-button{font:inherit;font-size:11px;height:100%;margin:0 10px 0 0;padding:0 12px;border:0;border-right:1px solid var(--ink);background:var(--ink);color:var(--white);cursor:pointer;text-transform:uppercase;letter-spacing:.06em}
+#dl{height:var(--ctl);padding:0 18px;background:var(--ink);color:var(--white);font-weight:700;font-size:13px;letter-spacing:.04em;text-transform:uppercase;border:0}
+#dl:disabled{background:var(--ink);color:var(--white);opacity:.3}
+body.dragging #pwrap{outline:3px dashed var(--ink);outline-offset:-8px}
+
+/* about: last item in the top bar, panel drops below the bar and shows its text in full */
+details.about{position:static;margin-left:auto;border-right:0;padding:0;height:var(--ctl)}
+details.about>summary{list-style:none;cursor:pointer;display:flex;align-items:center;height:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding:0 14px}
+details.about>summary::-webkit-details-marker{display:none}
+details.about[open]>summary{background:var(--ink);color:var(--white)}
+.aboutpanel{position:absolute;right:0;top:100%;width:min(600px,94vw);max-height:calc(100vh - 110px);overflow:auto;background:var(--white);border:2px solid var(--ink);padding:14px 16px;z-index:8;font-size:12.5px;text-align:left;color:var(--ink)}
+.aboutpanel h2{font-size:14px;margin:0 0 8px}
+.aboutpanel p{margin:0 0 8px}
+details.legal{border-top:1px solid var(--ink);padding-top:10px}
+details.legal>summary{cursor:pointer;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px}
+
+/* more settings: square groups, two controls per row */
+details.more{flex:none;background:var(--white);border:2px solid var(--ink);border-top:0}
+details.more>summary{position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));column-gap:12px;align-items:center;min-height:38px;padding:0 8px;cursor:pointer;list-style:none}
+
+.msep{position:absolute;top:0;bottom:0;left:var(--sepx,0px);width:1px;margin:0;background:var(--ink)}
+#sumStatus{pointer-events:none;grid-row:1;grid-column:1 / -1;padding-left:calc(var(--sepx,0px) + 12px);min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:0 10px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+#sumStatus .auto{margin-left:auto}
+details.more>summary::-webkit-details-marker{display:none}
+details.more>summary::before{content:none}
+.mbtn{grid-row:1;grid-column:1;display:flex;align-items:center;gap:8px;min-width:0}
+.mplus::before{content:"+";font-family:ui-monospace,Menlo,Consolas,monospace}
+details.more[open] .mplus::before{content:"−"}
+/* 13 px = fieldset border + padding, so this line sits on the Orientation box's right edge */
+
+.moregrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;padding:8px;border-top:1px solid var(--ink);max-height:44vh;overflow:auto}
+@media (max-width:1100px){.moregrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:640px){.moregrid{grid-template-columns:minmax(0,1fr)}}
+fieldset.grp{margin:0;min-width:0;border:1px solid var(--ink);padding:10px 12px 12px;display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;align-items:start}
+fieldset.grp legend{padding:0 6px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+fieldset.grp label{display:flex;flex-direction:column;gap:4px;font-size:12px;min-width:0}
+fieldset.grp label.check{flex-direction:row;align-items:center;gap:8px;padding-top:20px}
+fieldset.grp label.full,fieldset.grp small.full,fieldset.grp button.full{grid-column:1/-1}
+fieldset.grp small{color:var(--mute);font-size:11px}
+fieldset.grp .row{display:flex;gap:6px;align-items:center}
+fieldset.grp .row.full{grid-column:1/-1;align-items:baseline}
+fieldset.grp label.check.full{padding-top:0}
+fieldset.grp label button{width:100%}
+fieldset.grp .row.center{justify-content:center}
+fieldset.grp .row input[type=number]{width:90px}
+fieldset.grp select,fieldset.grp input[type=number]{width:100%}
+fieldset.grp button{justify-self:start}
+
+/* output */
+.out{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;background:var(--white);border:2px solid var(--ink);border-top:0;padding:8px;min-width:0}
+#status{flex:none;display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;margin:0 0 8px}
+#status[hidden]{display:none}
+#status .sl{white-space:pre-line}
+#status .sr{margin-left:auto;text-align:right}
+#status.warn{color:var(--red)}
+#status b{font-weight:700}
+#hint{display:none;flex:none;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;margin:0 0 8px;align-items:center;gap:10px;border:1px solid var(--ink);padding:6px 8px;background:var(--paper)}
+#hint.on{display:flex}
+#donate{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;font-size:13px;border:1px solid var(--ink);padding:10px 12px;margin:0 0 10px;background:var(--paper)}
+#donate[hidden]{display:none}
+#donate .txt{flex:1 1 360px}
+#donate p{margin:0 0 6px}
+#pwrap{flex:1 1 auto;min-height:0;overflow:auto;display:flex;background:var(--stage);border:1px solid var(--ink)}
+#preview{margin:auto;display:flex;flex-direction:column;align-items:center;gap:12px;padding:12px}
+#preview .pg{flex:none;background:#fff;border:1px solid var(--ink)}
+.pg svg{display:block;width:100%;height:100%}
+.empty{margin:0;padding:40px 16px;color:var(--mute);font-family:ui-monospace,Menlo,Consolas,monospace;text-transform:uppercase;letter-spacing:.06em;font-size:12px}
+
+/* desktop: the whole tool fits the screen, no page scroll */
+@media (min-width:760px){
+  html,body{height:100%;overflow:hidden}
+  main{height:100vh;height:100dvh}
+}
+/* phone: normal scrolling page */
+@media (max-width:759px){
+  #pwrap{flex:none;height:70vh;min-height:320px}
+  .top>label.load{width:100%;max-width:100%}
+  input[type=file]{width:100%;max-width:100%}
+}
+</style>
+</head>
+<body>
+<button class="tg tl" data-t="auto" title="Theme: auto (click to change)" aria-label="Theme: auto (click to change)"></button>
+<button class="tg tr" data-t="auto" title="Theme: auto (click to change)" aria-label="Theme: auto (click to change)"></button>
+<button class="tg bl" data-t="auto" title="Theme: auto (click to change)" aria-label="Theme: auto (click to change)"></button>
+<button class="tg br" data-t="auto" title="Theme: auto (click to change)" aria-label="Theme: auto (click to change)"></button>
+
+<main>
+<div class="top">
+  <span class="brand">STL → PDF 1:1</span>
+  <button id="cubeBtn" class="cubebtn" title="Add the 3 views of this cube side">
+    <svg viewBox="0 0 300 300" id="cube" aria-label="View cube"></svg>
+  </button>
+  <button id="rot" class="rot" title="Switch every selected view to its opposite and turn the cube" aria-label="Switch all views to opposite">⟳</button>
+  <label class="lbl load">Load STL <input type="file" id="file" accept=".stl"></label>
+  <label class="lbl">Paper
+    <select id="paper"><option value="A4">A4</option><option value="A3">A3</option><option value="LETTER">Letter</option></select>
+  </label>
+  <button id="dl" disabled>Download PDF</button>
+  <details class="about">
+    <summary>About this tool</summary>
+    <div class="aboutpanel">
+      <h2>What it is</h2>
+      <p>A free STL to PDF converter. It prints the side views of a 3D model (binary or ASCII STL) to a PDF at 1:1 scale on A4, A3 or Letter, so you can check the size and shape on paper before printing in plastic. Your STL file is processed in your browser and is never uploaded.</p>
+      <h2>How to use</h2>
+      <ul>
+        <li><b>Load:</b> press Load STL, or drop an .stl file anywhere on the page. The three views of the cube appear automatically. Set the units of the file in More settings.</li>
+                <li><b>Auto:</b> Orientation Auto picks portrait or landscape, whichever needs fewer pages.</li>
+        <li><b>Remove a view:</b> press the large X in the top right corner of its frame. If you remove all views, press the cube to add its three views again.</li>
+        <li><b>Switch to opposite:</b> press the arrow in the top left corner of its frame. The ⟳ button switches all views.</li>
+        <li><b>Pages:</b> when the views need more than one sheet, neighbouring pages overlap by 10 mm. Align the matching lines and tape them.</li>
+        <li><b>Paper:</b> choose A4, A3 or Letter in the top bar. Print at 100% / actual size.</li>
+        <li><b>Other options:</b> paper background and frame transparency, hidden lines, curve angle, custom angles. Ctrl + wheel zooms the preview, Ctrl+Z undoes view changes.</li>
+      </ul>
+      <h2>Why this tool exists</h2>
+      <p>I wanted to test the size and shape of a 3D model before printing it in plastic. I printed it on paper and held it up against the real thing. Doing this in a full CAD program takes more clicks than I think is reasonable, so I made this tool. I hope it saves time for other makers too, or that you find another use for it.</p>
+      <p><b>Tip:</b> If you want to test the details, don't cut exactly along the outline. Where the curve allows, leave a small margin for the gap you expect to add later.</p>
+      <p><b>Privacy:</b> Your STL file is processed in your browser and is never uploaded. The page uses GoatCounter, a counter that uses no cookies, to count anonymous visits, file loads, downloads and paper choices. No file content and no personal data is sent.</p>
+      <p><a href="https://buymeacoffee.com/drozdovlevh" target="_blank" rel="noopener">Support this tool</a></p>
+      <details class="legal">
+        <summary>More info</summary>
+        <p><b>As is.</b> The tool is provided "as is", without warranty of any kind.</p>
+        <p><b>Technical limits.</b> Hidden lines are estimated: only faces that point away from you are hidden, and they are not checked against other parts, so some hidden lines may show. Only triangle meshes in STL format (binary or ASCII) are read; colours and textures are ignored. Broken or open meshes can give wrong lines. Very large files can be slow. The PDF is 1:1 only when printed at 100% / actual size, not "fit to page". Check the 100 mm reference bar with a ruler before relying on the size.</p>
+        <p><b>Licence.</b> Free to use. You may copy and share it if you give a reference to the original tool. Licence: Creative Commons Attribution 4.0 (CC BY 4.0).</p>
+        <p><b>Responsibility.</b> The author is not responsible for any consequences of using this tool or its output, including wrong sizes, wasted material or damage. Use your own judgement.</p>
+      </details>
+    </div>
+  </details>
+</div>
+
+<details class="more">
+  <summary><span class="mbtn"><span class="mplus"></span><span class="lbl">More settings</span></span><span class="msep" aria-hidden="true"></span><span id="sumStatus"></span></summary>
+  <div class="moregrid">
+    <fieldset class="grp">
+      <legend>Paper and layout</legend>
+      <label>Orientation
+        <select id="orient" title="Auto picks the orientation that needs fewer pages"><option value="A">Auto</option><option value="P">Portrait</option><option value="L">Landscape</option></select>
+      </label>
+      <label>Paper background
+        <select id="bg"><option value="mm" selected>Millimetre paper</option><option value="cm">Centimetre grid</option><option value="none">None</option></select>
+      </label>
+      <label class="check full"><input type="checkbox" id="comb" checked> Combine views on page(s)</label>
+    </fieldset>
+    <fieldset class="grp">
+      <legend>Model</legend>
+      <label>Units of the STL
+        <select id="units"><option value="1">millimetres (mm)</option><option value="10">centimetres (cm)</option><option value="1000">metres (m)</option><option value="25.4">inches (in)</option></select>
+      </label>
+      <label>Axis points up
+        <select id="up"><option value="Z">Z axis</option><option value="Y">Y axis</option></select>
+      </label>
+      <label title="Edges where the surface bends more than this angle are drawn.">Show curves angle
+        <select id="thr"><option value="5">5°</option><option value="10">10°</option><option value="15">15°</option><option value="20">20°</option><option value="25">25°</option><option value="30" selected>30°</option><option value="35">35°</option><option value="40">40°</option><option value="45">45°</option><option value="60">60°</option><option value="75">75°</option><option value="90">90°</option><option value="120">120°</option><option value="150">150°</option></select>
+      </label>
+      <label class="check"><input type="checkbox" id="hid"> Show hidden lines (dashed)</label>
+    </fieldset>
+    <fieldset class="grp">
+      <legend>Custom Views</legend>
+      <label title="Horizontal angle of the view: 0° = front, 90° = right, 180° = back, 270° = left.">View angle (°)
+        <input type="number" id="ang" value="45" min="0" max="359.9" step="1">
+      </label>
+      <label>New view
+        <button id="addAng">Add view</button>
+      </label>
+      <small class="full">0° = front, 90° = right, 180° = back, 270° = left. Up to 6 views in total.</small>
+    </fieldset>
+    <fieldset class="grp">
+      <legend>Preview only</legend>
+      <label title="Frame and icons opacity">Frame opacity<select id="ov"><option value="20">20%</option><option value="40" selected>40%</option><option value="60">60%</option><option value="80">80%</option></select></label>
+      <label>Zoom
+        <select id="zoom">
+          <option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>Fit</option>
+          <option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option>
+        </select>
+      </label>
+    </fieldset>
+  </div>
+</details>
+
+<section class="out">
+  <div id="donate" hidden>
+    <div class="txt">
+      <p>Hope this small tool saves you time too. If you enjoyed it, you can buy me a coffee or send any amount you find comfortable. If you just want to make your print, that's fine: I'm glad it's useful to you as it is, clean and with no ads.</p>
+    </div>
+    <span class="row"><a class="btn" href="https://buymeacoffee.com/drozdovlevh" target="_blank" rel="noopener">Buy me a coffee</a><button type="button" id="donateHide">Hide</button></span>
+  </div>
+  <div id="status"></div>
+  <div id="hint"><span id="hintText"></span><button id="hintBtn">Switch</button></div>
+  <div id="pwrap"><div id="preview"></div></div>
+</section>
+</main>
+
+<script>
+// ---------- configuration ----------
+const GOATCOUNTER_CODE = "teshimoz";   // your GoatCounter site code (xxx in xxx.goatcounter.com). Empty = no counting.
+const MARGIN = 15;   // mm, left/right margin
+const HEAD = 25;     // mm, space reserved at top
+const FOOT = 25;     // mm, space reserved at bottom
+const OVERLAP = 10;  // mm, overlap between neighbouring tiled pages
+const GAP = 10;      // mm, gap between views when combined on one page
+const LABEL_H = 6;   // mm, label height above each combined view
+const DASH_ON = 2;   // mm, hidden line dash length
+const DASH_OFF = 1;  // mm, hidden line gap length
+const MAX_VIEWS = 6;
+const HISTORY_MAX = 100;
+const ICON_PAD = 3;  // mm, gap between the frame and the icons
+const UNIT_NAME = {"1":"mm","10":"cm","1000":"m","25.4":"in"};
+const PAPERS = {
+  A4:     {W:210,   H:297,   name:"A4"},
+  A3:     {W:297,   H:420,   name:"A3"},
+  LETTER: {W:215.9, H:279.4, name:"Letter"},
+};
+const PALETTE      = ["#d9472b", "#2563eb", "#15803d", "#7c3aed", "#ea8c00", "#0f8b8d"];   // light theme, in selection order
+const PALETTE_DARK = ["#ff8a6e", "#8bb8ff", "#6fe39a", "#c4aeff", "#ffc566", "#6fe6e9"];   // brighter, for dark theme
+const OPP = {Front:"Back", Back:"Front", Left:"Right", Right:"Left", Top:"Bottom", Bottom:"Top"};
+// grid classes: 0 = 1 mm (thin), 1 = 5 mm (mid), 2 = 10 mm / 1 cm (thick)
+const GRID_LIGHT = [ "#d6dee6", "#b3bfcb", "#8a9aab" ];   // on white paper
+const GRID_DARK  = [ "#2e2c27", "#4a463e", "#6b665b" ];   // inverted, on dark paper
+const GRID_STYLE = [
+  {w:0.1,  rg:"0.85 0.88 0.92"},
+  {w:0.25, rg:"0.72 0.78 0.84"},
+  {w:0.5,  rg:"0.55 0.62 0.70"},
+];
+const THEMES = ["auto", "light", "dark"];
+
+// Standard views, plus custom horizontal angles named like "45deg".
+// t = direction towards the viewer, U = screen right, V = screen up; model space is Z up.
+const VIEWS = {
+  Front:  {t:[0,-1,0], U:[1,0,0],  V:[0,0,1]},
+  Back:   {t:[0,1,0],  U:[-1,0,0], V:[0,0,1]},
+  Left:   {t:[-1,0,0], U:[0,-1,0], V:[0,0,1]},
+  Right:  {t:[1,0,0],  U:[0,1,0],  V:[0,0,1]},
+  Top:    {t:[0,0,1],  U:[1,0,0],  V:[0,1,0]},
+  Bottom: {t:[0,0,-1], U:[1,0,0],  V:[0,-1,0]},
+};
+function viewOf(name){
+  if (VIEWS[name]) return VIEWS[name];
+  const a = parseFloat(name) * Math.PI / 180;     // 0deg = Front, 90deg = Right
+  return {t:[Math.sin(a), -Math.cos(a), 0], U:[Math.cos(a), Math.sin(a), 0], V:[0,0,1]};
+}
+function oppOf(name){
+  if (OPP[name]) return OPP[name];
+  const a = (parseFloat(name) + 180) % 360;
+  return `${+a.toFixed(1)}deg`;
+}
+
+// Cube faces (isometric, 300x300 box). Side A shows top, front, right.
+// Side B is the vertical mirror of side A, showing bottom, left, back.
+const CUBE_A = [
+  {n:"Top",   p:[[150,150],[63,100],[150,50],[237,100]]},
+  {n:"Front", p:[[63,100],[150,150],[150,250],[63,200]]},
+  {n:"Right", p:[[150,150],[237,100],[237,200],[150,250]]},
+];
+const CUBE_B = [
+  {n:"Bottom", p:CUBE_A[0].p.map(([x,y]) => [x, 300 - y])},
+  {n:"Left",   p:CUBE_A[1].p.map(([x,y]) => [x, 300 - y])},
+  {n:"Back",   p:CUBE_A[2].p.map(([x,y]) => [x, 300 - y])},
+];
+
+let mesh = null;        // {name, pos, tris, nTri}
+let edges = null;       // precomputed edge table
+let selected = ["Top", "Front", "Right"];
+let cubeSide = "A";
+const history = [];     // previous selections, for undo
+
+const $ = id => document.getElementById(id);
+const colorOf = (v, dark) => { const i = selected.indexOf(v); return i < 0 ? "#888" : (dark ? PALETTE_DARK : PALETTE)[i]; };
+const sideViews = () => (cubeSide === "A" ? CUBE_A : CUBE_B).map(f => f.n);
+const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+// ---------- anonymous counting (GoatCounter, no cookies). Off until GOATCOUNTER_CODE is set ----------
+function setupCounter(){
+  if (!GOATCOUNTER_CODE) return;
+  const s = document.createElement("script");
+  s.async = true;
+  s.src = "https://gc.zgo.at/count.js";
+  s.setAttribute("data-goatcounter", `https://${GOATCOUNTER_CODE}.goatcounter.com/count`);
+  document.head.appendChild(s);
+}
+function track(name){
+  try {
+    if (GOATCOUNTER_CODE && window.goatcounter && window.goatcounter.count)
+      window.goatcounter.count({path: "tool/" + name, title: name, event: true});
+  } catch (e) {}
+}
+
+// ---------- STL parsing (binary or ASCII) ----------
+function parseSTL(buf){
+  const dv = new DataView(buf);
+  const raw = [];
+  const n = buf.byteLength >= 84 ? dv.getUint32(80, true) : -1;
+  if (n >= 0 && 84 + 50 * n === buf.byteLength){
+    for (let i = 0; i < n; i++){
+      const o = 84 + i * 50;
+      for (let k = 0; k < 9; k++) raw.push(dv.getFloat32(o + 12 + k * 4, true));
+    }
+  } else {
+    const txt = new TextDecoder().decode(buf);
+    const re = /vertex\s+([-+0-9.eE]+)\s+([-+0-9.eE]+)\s+([-+0-9.eE]+)/g;
+    let m;
+    while ((m = re.exec(txt))) raw.push(+m[1], +m[2], +m[3]);
+  }
+  if (raw.length < 9) throw new Error("No triangles found in file");
+
+  const map = new Map(), pos = [];
+  const nv = raw.length / 3;
+  const tris = new Uint32Array(nv);
+  for (let i = 0; i < nv; i++){
+    const x = raw[3*i], y = raw[3*i+1], z = raw[3*i+2];
+    const key = x.toFixed(5) + "," + y.toFixed(5) + "," + z.toFixed(5);
+    let id = map.get(key);
+    if (id === undefined){ id = pos.length / 3; map.set(key, id); pos.push(x, y, z); }
+    tris[i] = id;
+  }
+  return {pos: Float64Array.from(pos), tris, nTri: nv / 3};
+}
+
+// ---------- edge table (built once per file) ----------
+function buildEdges(m){
+  const {pos, tris, nTri} = m;
+  const V = pos.length / 3;
+
+  const N = new Float64Array(nTri * 3);
+  for (let t = 0; t < nTri; t++){
+    const a = tris[3*t]*3, b = tris[3*t+1]*3, c = tris[3*t+2]*3;
+    const ux = pos[b]-pos[a], uy = pos[b+1]-pos[a+1], uz = pos[b+2]-pos[a+2];
+    const vx = pos[c]-pos[a], vy = pos[c+1]-pos[a+1], vz = pos[c+2]-pos[a+2];
+    const nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+    const L = Math.hypot(nx, ny, nz) || 1;
+    N[3*t] = nx/L; N[3*t+1] = ny/L; N[3*t+2] = nz/L;
+  }
+
+  const emap = new Map();
+  for (let t = 0; t < nTri; t++){
+    for (let k = 0; k < 3; k++){
+      let a = tris[3*t+k], b = tris[3*t+(k+1)%3];
+      if (a === b) continue;
+      if (a > b){ const s = a; a = b; b = s; }
+      const key = a * V + b;
+      const e = emap.get(key);
+      if (!e) emap.set(key, {a, b, f1: t, f2: -1});
+      else if (e.f2 < 0) e.f2 = t;
+    }
+  }
+
+  const E = emap.size;
+  const ea = new Uint32Array(E), eb = new Uint32Array(E);
+  const f1 = new Int32Array(E), f2 = new Int32Array(E), cosD = new Float32Array(E);
+  let i = 0;
+  for (const e of emap.values()){
+    ea[i] = e.a; eb[i] = e.b; f1[i] = e.f1; f2[i] = e.f2;
+    let cd = 1;
+    if (e.f2 >= 0){
+      const p = 3*e.f1, q = 3*e.f2;
+      cd = N[p]*N[q] + N[p+1]*N[q+1] + N[p+2]*N[q+2];
+    }
+    cosD[i] = cd;
+    i++;
+  }
+  return {N, ea, eb, f1, f2, cosD, pos, E};
+}
+
+// ---------- settings ----------
+function makeCfg(paperKey, land){
+  const paper = PAPERS[paperKey || $("paper").value];
+  const isLand = land === undefined ? false : land;
+  const W = isLand ? paper.H : paper.W, H = isLand ? paper.W : paper.H;
+  const thrDeg = +$("thr").value;
+  if (!(thrDeg > 0 && thrDeg < 180)) throw new Error("Curve angle must be between 0 and 180");
+  return {
+    W, H, paperName: paper.name + (isLand ? " landscape" : " portrait"),
+    rx0: MARGIN, rx1: W - MARGIN, ry0: HEAD, ry1: H - FOOT,
+    rw: W - 2*MARGIN, rh: H - HEAD - FOOT,
+    s: +$("units").value, unit: UNIT_NAME[$("units").value],
+    yUp: $("up").value === "Y", showHidden: $("hid").checked,
+    bg: $("bg").value, thrDeg, cosThr: Math.cos(thrDeg * Math.PI / 180)
+  };
+}
+
+// ---------- one view -> edges in local mm coordinates (origin top-left, y down) ----------
+// type 1 = visible feature edge, 2 = silhouette / boundary, 3 = hidden (dashed)
+function computeView(vname, cfg){
+  const view = viewOf(vname);
+  let t = view.t;
+  if (cfg.yUp) t = [t[0], t[2], -t[1]];
+
+  const {N, ea, eb, f1, f2, cosD, pos, E} = edges;
+  const U = view.U, Vv = view.V, s = cfg.s, yUp = cfg.yUp;
+
+  const pr = vid => {
+    let x = pos[3*vid]*s, y = pos[3*vid+1]*s, z = pos[3*vid+2]*s;
+    if (yUp){ const ny = -z; z = y; y = ny; }
+    return [U[0]*x + U[1]*y + U[2]*z, Vv[0]*x + Vv[1]*y + Vv[2]*z];
+  };
+
+  const raw = [];
+  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+  for (let i = 0; i < E; i++){
+    const a = 3*f1[i];
+    const fr1 = N[a]*t[0] + N[a+1]*t[1] + N[a+2]*t[2] > 1e-9;
+    let type = 0;
+    if (f2[i] < 0){
+      if (fr1) type = 2;
+      else if (cfg.showHidden) type = 3;
+    } else {
+      const b = 3*f2[i];
+      const fr2 = N[b]*t[0] + N[b+1]*t[1] + N[b+2]*t[2] > 1e-9;
+      if (fr1 !== fr2) type = 2;
+      else if (fr1){
+        if (cosD[i] < cfg.cosThr) type = 1;
+      } else if (cfg.showHidden) type = 3;
+    }
+    if (!type) continue;
+    const p = pr(ea[i]), q = pr(eb[i]);
+    raw.push({x1:p[0], y1:p[1], x2:q[0], y2:q[1], type});
+    u0 = Math.min(u0, p[0], q[0]); u1 = Math.max(u1, p[0], q[0]);
+    v0 = Math.min(v0, p[1], q[1]); v1 = Math.max(v1, p[1], q[1]);
+  }
+  if (!raw.length) return null;
+  const segs = raw.map(g => ({x1: g.x1 - u0, y1: v1 - g.y1, x2: g.x2 - u0, y2: v1 - g.y2, type: g.type}));
+  return {name: vname, segs, bw: u1 - u0, bh: v1 - v0, lw: u1 - u0, lh: v1 - v0};
+}
+
+// ---------- grid (millimetre paper or centimetre grid), in page coordinates ----------
+const gridCache = {};
+function gridFor(W, H, kind){
+  if (kind === "none") return [];
+  const key = W + "x" + H + kind;
+  if (gridCache[key]) return gridCache[key];
+  const out = [];
+  if (kind === "cm"){
+    for (let x = 0; x <= W; x += 10) out.push({x1:x, y1:0, x2:x, y2:H, k:2});
+    for (let y = 0; y <= H; y += 10) out.push({x1:0, y1:y, x2:W, y2:y, k:2});
+  } else {
+    const kOf = i => (i % 10 === 0 ? 2 : (i % 5 === 0 ? 1 : 0));   // 10 mm thick, 5 mm mid, 1 mm thin
+    for (let x = 0; x <= W; x++) out.push({x1:x, y1:0, x2:x, y2:H, k:kOf(x)});
+    for (let y = 0; y <= H; y++) out.push({x1:0, y1:y, x2:W, y2:y, k:kOf(y)});
+  }
+  gridCache[key] = out;
+  return out;
+}
+
+// ---------- page helpers ----------
+function framePage(cfg, h1, h2){
+  const {W, H} = cfg;
+  // ruler: 100 mm from x = 20 to 120, on the 10 mm major grid lines; its baseline is also a major line
+  const ry = Math.round(H / 10) * 10 - 10, rx = 20;
+  const lines = [{x1:rx, y1:ry, x2:rx+100, y2:ry, w:0.5, dash:false}];
+  for (let i = 0; i <= 10; i++){
+    const x = rx + i*10;
+    lines.push({x1:x, y1:ry, x2:x, y2:ry - (i % 5 === 0 ? 3 : 2), w:0.5, dash:false});
+  }
+  const texts = [
+    {x:15, y:10, size:9, s:h1},
+    {x:W - 15, y:10, size:9, s:h2, anchor:"end"},
+    {x:rx+102, y:ry + 2.5, size:7, s:"100 mm"},
+    {x:15, y:H - 4, size:7, s:"Reference bar: measure it, it must be exactly 100.0 mm"},
+  ];
+  return {W, H, lines, texts, blocks: [], grid: gridFor(W, H, cfg.bg)};
+}
+
+function headerLine(cfg){
+  return `${mesh.name} | units: ${cfg.unit} (x${cfg.s}) | scale 1:1 | curve angle ${cfg.thrDeg} deg | hidden: ${cfg.showHidden ? "dashed" : "off"}`;
+}
+
+function offsetSegs(segs, ox, oy){
+  return segs.map(g => ({x1:g.x1+ox, y1:g.y1+oy, x2:g.x2+ox, y2:g.y2+oy, w: g.type === 2 ? 0.6 : 0.3, dash: g.type === 3}));
+}
+
+function clipSegs(segs, wx0, wy0, rw, rh, rx0, ry0){
+  const wx1 = wx0 + rw, wy1 = wy0 + rh, out = [];
+  for (const g of segs){
+    if (Math.max(g.x1, g.x2) < wx0 || Math.min(g.x1, g.x2) > wx1 ||
+        Math.max(g.y1, g.y2) < wy0 || Math.min(g.y1, g.y2) > wy1) continue;
+    out.push({x1:g.x1 - wx0 + rx0, y1:g.y1 - wy0 + ry0, x2:g.x2 - wx0 + rx0, y2:g.y2 - wy0 + ry0,
+              w: g.type === 2 ? 0.6 : 0.3, dash: g.type === 3});
+  }
+  return out;
+}
+
+// one view split into pages at 1:1 (centred if it fits on one page)
+function tileView(C, cfg){
+  const {rw, rh, rx0, ry0} = cfg, bw = C.bw, bh = C.bh;
+  const single = bw <= rw && bh <= rh;
+  const sx = rw - OVERLAP, sy = rh - OVERLAP;
+  const nc = single ? 1 : (bw <= rw ? 1 : Math.ceil((bw - OVERLAP) / sx));
+  const nr = single ? 1 : (bh <= rh ? 1 : Math.ceil((bh - OVERLAP) / sy));
+  const out = [];
+  for (let r = 0; r < nr; r++){
+    for (let c = 0; c < nc; c++){
+      const wx0 = single ? -(rw - bw)/2 : c*sx;
+      const wy0 = single ? -(rh - bh)/2 : r*sy;
+      const h2 = `View: ${C.name} | whole model ${bw.toFixed(2)} x ${bh.toFixed(2)} mm` + (single ? "" : ` | tile row ${r+1}, column ${c+1}`);
+      const P = framePage(cfg, headerLine(cfg), h2);
+      P.lines = P.lines.concat(clipSegs(C.segs, wx0, wy0, rw, rh, rx0, ry0));
+      if (!single) P.texts.push({x:15, y:22, size:9, s:`Pages overlap ${OVERLAP} mm: align the matching lines and tape.`});
+      P.blocks.push({view: C.name, x: 0, y: 0, w: cfg.W, h: cfg.H});
+      out.push(P);
+    }
+  }
+  return out;
+}
+
+// icon size for a view frame of w x h (mm): the X size; the arrow is 15% larger
+function iconSize(w, h){ return Math.max(5, Math.min(11.5, Math.min(w, h) * 0.12)); }
+const CHAR_MM = 1.8;   // rough width of one character at 9 pt, mm
+
+// Turn a view 90° clockwise: its width becomes its height. The label keeps the model size.
+function turnComp(C){
+  const segs = C.segs.map(g => ({x1: C.bh - g.y1, y1: g.x1, x2: C.bh - g.y2, y2: g.x2, type: g.type}));
+  return {name: C.name, segs, bw: C.bh, bh: C.bw, lw: C.lw, lh: C.lh, turned: true};
+}
+
+// Shelf packing of several views onto shared pages. With allowTurn, a view may be turned if that lets it fit on the current row.
+// Label "Name: W x H mm" is centred above the view; if it does not fit there it is rotated and placed on the left side.
+function packOnce(list, cfg, allowTurn){
+  const out = [], eps = 1e-6;
+  let page, x, y, rowH, turned = false;
+  const names = list.map(C => C.name).join(", ");
+  const newPage = () => {
+    page = framePage(cfg, headerLine(cfg), `Views: ${names}`);
+    out.push(page); x = cfg.rx0; y = cfg.ry0; rowH = 0;
+  };
+  const fresh = cands => cands.find(c => c.bw <= cfg.rw + eps) || cands[0];
+  newPage();
+  for (const C0 of list){
+    const cands = [C0];
+    if (allowTurn){ const T = turnComp(C0); if (T.bh + LABEL_H <= cfg.rh + eps) cands.push(T); }
+    let C = cands.find(c => x + c.bw <= cfg.rx1 + eps);
+    if (!C){ x = cfg.rx0; y += rowH + GAP; rowH = 0; C = fresh(cands); }
+    if (y + C.bh + LABEL_H > cfg.ry1 + eps){ newPage(); C = fresh(cands); }
+    if (C.turned) turned = true;
+    const hgt = C.bh + LABEL_H;
+    page.lines = page.lines.concat(offsetSegs(C.segs, x, y + LABEL_H));
+    const label = `${C.name}: ${C.lw.toFixed(2)} x ${C.lh.toFixed(2)} mm`;
+    const len = label.length * CHAR_MM;
+    const s = iconSize(C.bw, hgt), iconRoom = (s * 1.15 + ICON_PAD + 2) * 2;
+    if (len <= C.bw - iconRoom){
+      page.texts.push({x: x + C.bw/2 - len/2, y: y + 4.2, size: 9, s: label});
+    } else {
+      const cy = y + hgt/2;
+      page.texts.push({x: x + 4.5, y: cy + len/2, size: 9, s: label, rot: true});
+    }
+    page.blocks.push({view: C.name, x, y, w: C.bw, h: hgt});
+    x += C.bw + GAP;
+    rowH = Math.max(rowH, hgt);
+  }
+  return {pages: out, turned};
+}
+
+// Try without and with turning; keep the turned layout only if it needs fewer pages.
+function packBest(list, cfg){
+  const plain = packOnce(list, cfg, false);
+  const turnedRun = packOnce(list, cfg, true);
+  return turnedRun.pages.length < plain.pages.length ? turnedRun : plain;
+}
+
+// lay out the views on one paper size and orientation
+function layoutPages(comps, paperKey, land, combine){
+  const cfg = makeCfg(paperKey, land);
+  let pages = [];
+  const notes = [];
+  if (combine){
+    const fit = comps.filter(C => C.bw <= cfg.rw && C.bh + LABEL_H <= cfg.rh);
+    const big = comps.filter(C => !fit.includes(C));
+    if (fit.length){
+      const packed = packBest(fit, cfg);
+      pages = pages.concat(packed.pages);
+      if (packed.turned) notes.push("Some views are turned 90° to fit fewer pages");
+    }
+    for (const C of big){
+      notes.push(`${C.name} is larger than one page and is tiled on separate pages`);
+      pages = pages.concat(tileView(C, cfg));
+    }
+  } else {
+    for (const C of comps) pages = pages.concat(tileView(C, cfg));
+  }
+  if (pages.length > 1)
+    pages.forEach((P, i) => P.texts.push({x: cfg.W - 40, y: cfg.H - 4, size: 7, s: `Page ${i+1}/${pages.length}`}));
+  return {pages, cfg, notes};
+}
+
+// ---------- build all pages from the current selection and settings ----------
+function buildAll(){
+  if (!selected.length) throw new Error("Select at least one view on the cube");
+  const base = makeCfg();
+  const combine = $("comb").checked && selected.length > 1;
+  const comps = selected.map(v => computeView(v, base)).filter(Boolean);
+  if (!comps.length) throw new Error("No visible edges in the selected views. Check up axis, views and curve angle.");
+
+  const paper = $("paper").value;
+  const want = $("orient").value;                     // A (auto), P or L
+  const cands = want === "A" ? ["P", "L"] : [want];
+  const res = {};
+  for (const o of cands) res[o] = layoutPages(comps, paper, o === "L", combine);
+
+  let pick = cands[0];
+  let autoNote = "";
+  if (want === "A"){
+    pick = res.P.pages.length < res.L.pages.length ? "P" : "L";
+    autoNote = `Auto: ${pick === "P" ? "portrait" : "landscape"}`;
+  }
+  const R = res[pick];
+
+  // hint: when the other orientation needs fewer pages, offer to switch
+  let hint = null;
+  if (want !== "A" && (combine || comps.length > 1)){
+    const other = want === "L" ? "P" : "L";
+    const alt = layoutPages(comps, paper, other === "L", combine);
+    if (alt.pages.length < R.pages.length)
+      hint = {other, text: `${other === "P" ? "Portrait" : "Landscape"} fits ${comps.length} views on ${alt.pages.length} page${alt.pages.length > 1 ? "s" : ""}; this layout uses ${R.pages.length}.`};
+  }
+  const edgesTotal = comps.reduce((a, C) => a + C.segs.length, 0);
+  return {pages: R.pages, comps, cfg: R.cfg, combine, notes: R.notes, autoNote,
+          edgesTotal, views: comps.map(C => C.name), hint};
+}
+
+// ---------- PDF output (vector, mm -> pt exact, one PDF page per paper page, always white paper) ----------
+function escPdf(s){ return s.replace(/[^\x20-\x7e]/g, "?").replace(/[\\()]/g, m => "\\" + m); }
+
+function pageContent(P, k){
+  const f = n => n.toFixed(3);
+  const X = x => f(x*k), Y = y => f((P.H - y)*k);
+  const parts = [];
+  for (const g of P.grid){
+    const st = GRID_STYLE[g.k];
+    parts.push(`${st.rg} RG ${f(st.w)} w ${X(g.x1)} ${Y(g.y1)} m ${X(g.x2)} ${Y(g.y2)} l S`);
+  }
+  parts.push("0 0 0 RG 0 0 0 rg 1 J 1 j");
+  for (const L of P.lines){
+    if (L.dash) parts.push(`[${f(DASH_ON*k)} ${f(DASH_OFF*k)}] 0 d`);
+    parts.push(`${f(L.w)} w ${X(L.x1)} ${Y(L.y1)} m ${X(L.x2)} ${Y(L.y2)} l S`);
+    if (L.dash) parts.push("[] 0 d");
+  }
+  for (const T of P.texts){
+    if (T.rot) parts.push(`BT /F1 ${T.size} Tf 0 1 -1 0 ${X(T.x)} ${Y(T.y)} Tm (${escPdf(T.s)}) Tj ET`);
+    else parts.push(`BT /F1 ${T.size} Tf ${X(T.anchor === "end" ? T.x - T.s.length * T.size * 0.5 * 25.4 / 72 : T.x)} ${Y(T.y)} Td (${escPdf(T.s)}) Tj ET`);
+  }
+  return parts.join("\n");
+}
+
+function toPDF(pages){
+  const k = 72 / 25.4;
+  const f = n => n.toFixed(3);
+  const n = pages.length;
+  const fontObj = 3 + 2*n;
+  const objs = [];
+  objs.push("<< /Type /Catalog /Pages 2 0 R >>");
+  objs.push(`<< /Type /Pages /Kids [${pages.map((_, i) => (3 + 2*i) + " 0 R").join(" ")}] /Count ${n} >>`);
+  pages.forEach((P, i) => {
+    const contentObj = 4 + 2*i;
+    objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${f(P.W*k)} ${f(P.H*k)}] /Contents ${contentObj} 0 R /Resources << /Font << /F1 ${fontObj} 0 R >> >> >>`);
+    const content = pageContent(P, k);
+    objs.push(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+  });
+  objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+
+  let out = "%PDF-1.4\n";
+  const offs = [];
+  objs.forEach((o, i) => { offs.push(out.length); out += `${i+1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length+1}\n0000000000 65535 f \n`;
+  offs.forEach(o => { out += String(o).padStart(10, "0") + " 00000 n \n"; });
+  out += `trailer\n<< /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new Blob([out], {type: "application/pdf"});
+}
+
+// ---------- on-screen preview (same geometry, SVG in mm) ----------
+// dark = the dark theme is active: dark paper, white lines, inverted grid, brighter overlay. Preview only.
+// overlay opacity from the Frame opacity drop-list
+function ovOpacity(){ const el = $("ov"); const v = el ? (+el.value || 40) : 40; return +(v / 100).toFixed(2); }
+function toSVG(P, dark){
+  const k = 25.4 / 72;   // pt -> mm
+  const paperFill = dark ? "#1b1a17" : "#fff";
+  const ink = dark ? "#f2f1ec" : "#111";
+  const gridHex = dark ? GRID_DARK : GRID_LIGHT;
+  let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${P.W} ${P.H}">`;
+  s += `<rect x="0" y="0" width="${P.W}" height="${P.H}" fill="${paperFill}"/>`;
+  for (const g of P.grid)
+    s += `<line x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}" stroke="${gridHex[g.k]}" stroke-width="${(GRID_STYLE[g.k].w*k).toFixed(3)}"/>`;
+  for (const L of P.lines){
+    const dash = L.dash ? ` stroke-dasharray="${DASH_ON} ${DASH_OFF}"` : "";
+    s += `<line x1="${L.x1.toFixed(3)}" y1="${L.y1.toFixed(3)}" x2="${L.x2.toFixed(3)}" y2="${L.y2.toFixed(3)}" stroke="${ink}" stroke-width="${(L.w*k).toFixed(3)}" stroke-linecap="round"${dash}/>`;
+  }
+  for (const T of P.texts){
+    const font = `font-size="${(T.size*k).toFixed(3)}" font-family="ui-monospace,Menlo,Consolas,monospace" fill="${T.warn ? "#d9472b" : ink}"`;
+    if (T.rot) s += `<text x="${T.x.toFixed(2)}" y="${T.y.toFixed(2)}" transform="rotate(-90 ${T.x.toFixed(2)} ${T.y.toFixed(2)})" ${font}>${esc(T.s)}</text>`;
+    else s += `<text x="${T.x.toFixed(2)}" y="${T.y}" ${T.anchor === "end" ? 'text-anchor="end" ' : ""}${font}>${esc(T.s)}</text>`;
+  }
+
+  // Overlay layer (frame + icons + label): drawn at 40% opacity so it reads as not printed.
+  for (const b of P.blocks){
+    const col = colorOf(b.view, dark);
+    const ic = viewIcons(b, col);
+    s += `<g data-view="${esc(b.view)}" opacity="${ovOpacity()}">`;
+    s += `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" fill="none" stroke="${col}" stroke-width="1.2" pointer-events="none"/>`;
+    s += ic.svg;
+    s += `</g>`;
+  }
+  return s + "</svg>";
+}
+
+// Icons in each view frame, inset from the frame by ICON_PAD for readability:
+// circular arrow (top left, switches to the opposite view) and large X (top right, removes the view).
+// The arrow is 15% larger than the X. Lines are thick.
+function viewIcons(b, col){
+  const s = iconSize(b.w, b.h);                       // X size, mm
+  const sa = s * 1.15;                                // arrow size, mm
+  const x1 = b.x + ICON_PAD, y1 = b.y + ICON_PAD;
+  const x2 = b.x + b.w - ICON_PAD;
+  const sw = (s * 0.2).toFixed(2);                    // thick line weight
+  // circular arrow
+  const cx = x1 + sa/2, cy = y1 + sa/2, r = sa * 0.36;
+  const P = a => [cx + r*Math.cos(a), cy + r*Math.sin(a)];
+  const a0 = -60 * Math.PI/180, a1 = 230 * Math.PI/180;
+  const [sx, sy] = P(a0), [ex, ey] = P(a1);
+  const tx = -Math.sin(a1), ty = Math.cos(a1), nx = Math.cos(a1), ny = Math.sin(a1);
+  const hs = sa * 0.22;
+  const arc = `M${sx.toFixed(2)} ${sy.toFixed(2)} A${r.toFixed(2)} ${r.toFixed(2)} 0 1 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`;
+  const head = `M${(ex + nx*hs).toFixed(2)} ${(ey + ny*hs).toFixed(2)} L${(ex + tx*hs*1.4).toFixed(2)} ${(ey + ty*hs*1.4).toFixed(2)} L${(ex - nx*hs).toFixed(2)} ${(ey - ny*hs).toFixed(2)}`;
+  let g = `<path d="${arc} ${head}" fill="none" stroke="${col}" stroke-width="${sw}" stroke-linecap="square" pointer-events="none"/>`;
+  g += `<path d="${arc} ${head}" fill="none" stroke="#000" stroke-opacity="0" stroke-width="${(sa*0.7).toFixed(2)}" pointer-events="stroke" style="cursor:pointer" data-swap="${esc(b.view)}"><title>Switch to ${esc(oppOf(b.view))}</title></path>`;
+  // large X
+  const bx = x2 - s, by = y1;
+  const xd = `M${bx.toFixed(2)} ${by.toFixed(2)} L${(bx+s).toFixed(2)} ${(by+s).toFixed(2)} M${(bx+s).toFixed(2)} ${by.toFixed(2)} L${bx.toFixed(2)} ${(by+s).toFixed(2)}`;
+  g += `<path d="${xd}" fill="none" stroke="${col}" stroke-width="${sw}" stroke-linecap="square" pointer-events="none"/>`;
+  g += `<path d="${xd}" fill="none" stroke="#000" stroke-opacity="0" stroke-width="${(s*0.7).toFixed(2)}" pointer-events="stroke" style="cursor:pointer" data-remove="${esc(b.view)}"><title>Remove ${esc(b.view)}</title></path>`;
+  return {svg: g};
+}
+
+// Preview sizing only (the PDF is always 1:1). Paper fills the frame without scrolling:
+// one page: as large as the frame allows (limited by width or height), centred.
+// several pages: stacked vertically; the first page is 80% of the frame height so the next one peeks in.
+function layoutPreview(){
+  const wrap = $("pwrap"), pv = $("preview");
+  const pgs = pv.querySelectorAll(".pg");
+  if (!pgs.length || !wrap || !wrap.clientWidth) return;
+  const availW = Math.max(60, wrap.clientWidth - 40), availH = Math.max(60, wrap.clientHeight - 40);
+  const W = +pgs[0].dataset.w, H = +pgs[0].dataset.h, aspect = W / H;
+  let ph = pgs.length === 1 ? availH : availH * 0.8;
+  ph = Math.min(ph, availW / aspect);
+  let pw = ph * aspect;
+  const z = +$("zoom").value || 1;
+  pw *= z; ph *= z;
+  pgs.forEach(p => { p.style.width = pw + "px"; p.style.height = ph + "px"; });
+}
+
+// ---------- view cube (in the toolbar) ----------
+function renderCube(){
+  const faces = cubeSide === "A" ? CUBE_A : CUBE_B;
+  let s = "";
+  for (const f of faces){
+    const sel = selected.includes(f.n);
+    const col = colorOf(f.n, false);
+    s += `<polygon class="face" data-face="${f.n}" points="${f.p.map(p => p.join(",")).join(" ")}" style="fill:${sel ? col : "var(--white)"}" fill-opacity="${sel ? 0.25 : 1}" stroke="currentColor" stroke-width="14" stroke-linejoin="miter"><title>${f.n}</title></polygon>`;
+  }
+  $("cube").innerHTML = s;
+}
+
+// status: left part (html, may be multi-line), optional right-aligned part on the same line
+function alignSep(){
+  const d = document.querySelector("details.more"), sum = d && d.querySelector("summary"), cube = $("cubeBtn"), rot = $("rot");
+  if (!sum || !cube || !rot) return;
+  const mid = (cube.getBoundingClientRect().right + rot.getBoundingClientRect().left) / 2;
+  sum.style.setProperty("--sepx", (mid - sum.getBoundingClientRect().left).toFixed(1) + "px");
+}
+function setHead(html){ $("sumStatus").innerHTML = html; }
+function setStatus(html, warn, right){
+  const st = $("status");
+  st.className = warn ? "warn" : "";
+  st.hidden = !html && !right;
+  st.innerHTML = `<span class="sl">${html}</span>` + (right ? `<span class="sr">${right}</span>` : "");
+}
+
+// ---------- selection changes (all go through commit, so Ctrl+Z can undo them) ----------
+function commit(next){
+  if (next.length === selected.length && next.every((v, i) => v === selected[i])) return;
+  history.push(selected.slice());
+  if (history.length > HISTORY_MAX) history.shift();
+  selected = next;
+  refresh();
+}
+
+function undo(){
+  if (!history.length){ setStatus("Nothing to undo", false); return; }
+  selected = history.pop();
+  refresh();
+}
+
+// cube: add the three views of the current side (up to 6 in total)
+function clickCube(){
+  const add = sideViews().filter(v => !selected.includes(v));
+  if (!add.length){ setStatus("These three views are already selected", false); return; }
+  const room = MAX_VIEWS - selected.length;
+  if (room <= 0){ setStatus(`Maximum ${MAX_VIEWS} views. Remove one first.`, true); return; }
+  if (add.length > room) setStatus(`Only ${room} more view${room > 1 ? "s" : ""} fit (maximum ${MAX_VIEWS}).`, true);
+  commit(selected.concat(add.slice(0, room)));
+}
+
+function removeView(name){
+  commit(selected.filter(v => v !== name));
+}
+
+function swapView(name){
+  const opp = oppOf(name);
+  if (selected.includes(opp)) commit(selected.filter(v => v !== name));   // opposite already shown: just drop this one
+  else commit(selected.map(v => v === name ? opp : v));                   // same slot, same colour
+}
+
+function addAngle(){
+  const a = parseFloat($("ang").value);
+  if (!(a >= 0 && a < 360)){ setStatus("Angle must be between 0 and 359.9", true); return; }
+  const name = `${+a.toFixed(1)}deg`;
+  if (selected.includes(name)){ setStatus(`${esc(name)} is already selected`, true); return; }
+  if (selected.length >= MAX_VIEWS){ setStatus(`Maximum ${MAX_VIEWS} views. Remove one first.`, true); return; }
+  commit(selected.concat([name]));
+}
+
+// On load: show the three views of side A, combined on one page.
+function applyLoadDefaults(){
+  cubeSide = "A";
+  selected = CUBE_A.map(f => f.n);
+  history.length = 0;
+  $("comb").checked = true;
+  renderCube();
+}
+
+// arrow: every selected view goes to its opposite (same slot, same colour), and the cube turns to the other side
+function rotateAll(){
+  const svg = $("cube");
+  if (svg.classList.contains("spin")) return;
+  if (!selected.length){ setStatus("No views selected", false); return; }
+  commit(selected.map(oppOf));
+  svg.classList.add("spin");
+  svg.addEventListener("animationend", () => {
+    svg.classList.remove("spin");
+    cubeSide = cubeSide === "A" ? "B" : "A";
+    renderCube();
+  }, {once: true});
+}
+
+function refresh(){
+  renderCube();
+  update();
+}
+
+// ---------- main update ----------
+function isDarkNow(){
+  const t = document.documentElement.getAttribute("data-theme");
+  if (t) return t === "dark";
+  try { return window.matchMedia("(prefers-color-scheme: dark)").matches; } catch (e) { return false; }
+}
+
+function update(){
+  alignSep();
+  const pv = $("preview");
+  $("hint").classList.remove("on");
+  if (!mesh){
+    pv.innerHTML = `<p class="empty">Load an STL file, or drop it anywhere on this page</p>`;
+    $("dl").disabled = true;
+    setStatus("", false); setHead("");
+    return;
+  }
+  if (!selected.length){
+    pv.innerHTML = `<p class="empty">Click the cube to add its three views</p>`;
+    $("dl").disabled = true;
+    setStatus("", false); setHead("");
+    return;
+  }
+  try {
+    const R = buildAll();
+    const dark = isDarkNow();
+    pv.innerHTML = R.pages.map(P => `<div class="pg" data-w="${P.W}" data-h="${P.H}">${toSVG(P, dark)}</div>`).join("");
+    layoutPreview();
+    const layout = R.combine ? "combined on shared pages" : "one set of pages per view";
+    setHead(`<b>${esc(R.cfg.paperName)}</b> · ${layout} · pages: <b>${R.pages.length}</b> · triangles: ${mesh.nTri.toLocaleString("en-US")} · edges: ${R.edgesTotal.toLocaleString("en-US")}` + (R.autoNote ? `<span class="auto">${esc(R.autoNote)}</span>` : ""));
+    const extra = [];
+    if (R.notes.length) extra.push(R.notes.map(esc).join(". ") + ".");
+    if (R.cfg.showHidden) extra.push("Hidden lines are approximate: back-facing edges only.");
+    setStatus(extra.join("<br>"), false);
+    if (R.hint){
+      $("hintText").textContent = R.hint.text;
+      $("hintBtn").dataset.orient = R.hint.other;
+      $("hintBtn").textContent = `Switch to ${R.hint.other === "P" ? "portrait" : "landscape"}`;
+      $("hint").classList.add("on");
+    }
+    $("dl").disabled = false;
+  } catch (e) {
+    setHead("");
+    setStatus(esc(e.message), true);
+    pv.innerHTML = "";
+    $("dl").disabled = true;
+  }
+}
+
+// ---------- file loading (button or drag and drop) ----------
+async function loadFile(f){
+  if (!f) return;
+  setStatus(`Reading ${esc(f.name)} ...`, false);
+  try {
+    const buf = await f.arrayBuffer();
+    mesh = parseSTL(buf);
+    mesh.name = f.name.replace(/\.stl$/i, "");
+    edges = buildEdges(mesh);
+    applyLoadDefaults();
+    update();
+    track("load");
+  } catch (err) {
+    mesh = null; edges = null;
+    setStatus("Error: " + esc(err.message), true);
+    $("dl").disabled = true;
+  }
+}
+
+// ---------- theme: one cycling switch, shown in all four corners ----------
+let themeIdx = 0;
+function applyTheme(t){
+  try {
+    if (t === "auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+  themeIdx = THEMES.indexOf(t) < 0 ? 0 : THEMES.indexOf(t);
+  try {
+    document.querySelectorAll(".tg").forEach(b => {
+      b.setAttribute("data-t", t);
+      b.setAttribute("title", `Theme: ${t} (click to change)`);
+      b.setAttribute("aria-label", `Theme: ${t} (click to change)`);
+    });
+  } catch (e) {}
+  try { localStorage.setItem("stl-theme", t); } catch (e) {}
+  if (mesh) update();
+}
+function cycleTheme(){ applyTheme(THEMES[(themeIdx + 1) % THEMES.length]); }
+function readTheme(){
+  try { return localStorage.getItem("stl-theme") || "auto"; } catch (e) { return "auto"; }
+}
+
+// ---------- events ----------
+$("cubeBtn").addEventListener("click", clickCube);
+$("rot").addEventListener("click", rotateAll);
+$("addAng").addEventListener("click", addAngle);
+$("hintBtn").addEventListener("click", () => { $("orient").value = $("hintBtn").dataset.orient; update(); });
+$("preview").addEventListener("click", e => {
+  const sw = e.target.closest("[data-swap]");   if (sw) return swapView(sw.dataset.swap);
+  const rm = e.target.closest("[data-remove]"); if (rm) return removeView(rm.dataset.remove);
+});
+$("donateHide").addEventListener("click", () => { $("donate").hidden = true; });
+document.querySelector("details.more > summary").addEventListener("click", () => {
+  document.querySelectorAll("details.about").forEach(d => d.removeAttribute("open"));
+});
+document.querySelectorAll(".tg").forEach(b => b.addEventListener("click", cycleTheme));
+
+// Ctrl+Z / Cmd+Z undoes selection changes; text-editing fields keep their own undo
+document.addEventListener("keydown", e => {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== "z") return;
+  const t = e.target;
+  if (t && (t.tagName === "SELECT" || (t.tagName === "INPUT" && t.type !== "checkbox"))) return;
+  e.preventDefault();
+  undo();
+});
+
+$("file").addEventListener("change", e => loadFile(e.target.files[0]));
+
+// drag and drop an STL anywhere on the page
+document.addEventListener("dragover", e => { e.preventDefault(); document.body.classList.add("dragging"); });
+document.addEventListener("dragleave", e => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
+document.addEventListener("drop", e => {
+  e.preventDefault();
+  document.body.classList.remove("dragging");
+  const f = e.dataTransfer && e.dataTransfer.files[0];
+  if (f){ try { const dt = new DataTransfer(); dt.items.add(f); $("file").files = dt.files; } catch (err) {} loadFile(f); }
+});
+
+["comb", "units", "orient", "up", "hid", "bg", "ov"].forEach(id => $(id).addEventListener("change", update));
+$("paper").addEventListener("change", () => { track("paper-" + $("paper").value); update(); });
+$("thr").addEventListener("change", update);
+$("thr").addEventListener("input", update);
+$("zoom").addEventListener("change", layoutPreview);
+// Ctrl + wheel over the paper steps the zoom list (browser page zoom is blocked there)
+let wheelAcc = 0;
+$("pwrap").addEventListener("wheel", e => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  wheelAcc += e.deltaY;
+  if (Math.abs(wheelAcc) < 40) return;
+  const step = wheelAcc < 0 ? 1 : -1; wheelAcc = 0;
+  const sel = $("zoom");
+  const n = Math.max(0, Math.min(sel.options.length - 1, sel.selectedIndex + step));
+  if (n !== sel.selectedIndex){ sel.selectedIndex = n; layoutPreview(); }
+}, {passive: false});
+
+$("dl").addEventListener("click", () => {
+  try {
+    const R = buildAll();
+    const blob = toPDF(R.pages);
+    const suffix = R.views.join("-") + (R.combine ? "_combined" : "") + "_" + R.cfg.paperName.replace(/\s+/g, "");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${mesh.name}_${suffix}_1to1.pdf`.replace(/[^\w.\-]+/g, "_");
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    track("download-" + $("paper").value);
+    $("donate").hidden = false;     // shown after every download; Hide closes it until the next download
+  } catch (e) {
+    setStatus(esc(e.message), true);
+  }
+});
+
+// re-fit the preview whenever its frame changes size (window resize, More settings opened or closed)
+try { window.addEventListener("resize", () => { alignSep(); layoutPreview(); }); } catch (e) {}
+try { if (window.ResizeObserver) new ResizeObserver(layoutPreview).observe($("pwrap")); } catch (e) {}
+document.querySelectorAll("details:not(.more)").forEach(d => d.addEventListener("toggle", () => requestAnimationFrame(layoutPreview)));
+
+alignSep();
+setupCounter();
+applyTheme(readTheme());
+renderCube();
+update();
+</script>
+</body>
+</html>
