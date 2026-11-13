@@ -7,7 +7,7 @@ Print the side views of a 3D model (STL) to a PDF at **1:1 scale** on A4, A3 or 
 ## What it does
 
 - Loads a binary or ASCII **STL** file. Drag it onto the page or press **Load STL**.
-- Shows the three views of the cube side (Top, Front, Right) automatically. Press the cube to add its three views; up to **6 views** in total.
+- Shows the three views of the cube side (Top, Front, Right) automatically. Press the cube to show the three views of its side (replacing the current ones).
 - Adds any **custom horizontal angle** (for example 45°, where 0° = front and 90° = right).
 - Draws **outer contour** and **sharp edges** (edges where the surface bends more than the chosen curve angle). Hidden lines can be shown dashed (approximate).
 - Puts views on **one shared sheet** when they fit, or on separate pages. Multi-page output has overlapping pages with page numbers and matching alignment lines.
