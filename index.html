@@ -177,7 +177,7 @@ fieldset.grp button{justify-self:start}
       <details class="legal">
         <summary>More info</summary>
         <p><b>As is.</b> The tool is provided "as is", without warranty of any kind.</p>
-        <p><b>Technical limits.</b> Hidden lines are estimated: only faces that point away from you are hidden, and they are not checked against other parts, so some hidden lines may show. Only triangle meshes in STL format (binary or ASCII) are read; colours and textures are ignored. Broken or open meshes can give wrong lines. Very large files can be slow. The PDF is 1:1 only when printed at 100% / actual size, not "fit to page". Check the 100 mm reference bar with a ruler before relying on the size.</p>
+        <p><b>Technical limits.</b> Hidden lines are found with a depth map of the model (about 0.1 mm per pixel on small parts, coarser on large ones), so very thin features or lines closer than a pixel to a surface can be wrong. Only triangle meshes in STL format (binary or ASCII) are read; colours and textures are ignored. Broken or open meshes can give wrong lines. Very large files can be slow. The PDF is 1:1 only when printed at 100% / actual size, not "fit to page". Check the 100 mm reference bar with a ruler before relying on the size.</p>
         <p><b>Licence.</b> Free to use. You may copy and share it if you give a reference to the original tool. Licence: Creative Commons Attribution 4.0 (CC BY 4.0).</p>
         <p><b>Responsibility.</b> The author is not responsible for any consequences of using this tool or its output, including wrong sizes, wasted material or damage. Use your own judgement.</p>
       </details>
@@ -439,44 +439,113 @@ function makeCfg(paperKey, land){
 // type 1 = visible feature edge, 2 = silhouette / boundary, 3 = hidden (dashed)
 function computeView(vname, cfg){
   const view = viewOf(vname);
-  let t = view.t;
-  if (cfg.yUp) t = [t[0], t[2], -t[1]];
-
+  const T = view.t, U = view.U, Vv = view.V, s = cfg.s, yUp = cfg.yUp;
+  const t = yUp ? [T[0], T[2], -T[1]] : T;      // view direction in file coordinates, for face normals
   const {N, ea, eb, f1, f2, cosD, pos, E} = edges;
-  const U = view.U, Vv = view.V, s = cfg.s, yUp = cfg.yUp;
+  const tris = mesh.tris, nTri = mesh.nTri;
+  const nv = pos.length / 3;
 
-  const pr = vid => {
-    let x = pos[3*vid]*s, y = pos[3*vid+1]*s, z = pos[3*vid+2]*s;
+  // 1. project every vertex: screen u, v (mm) and depth towards the viewer
+  const pu = new Float64Array(nv), pv = new Float64Array(nv), pd = new Float64Array(nv);
+  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+  for (let i = 0; i < nv; i++){
+    let x = pos[3*i]*s, y = pos[3*i+1]*s, z = pos[3*i+2]*s;
     if (yUp){ const ny = -z; z = y; y = ny; }
-    return [U[0]*x + U[1]*y + U[2]*z, Vv[0]*x + Vv[1]*y + Vv[2]*z];
+    const u = U[0]*x + U[1]*y + U[2]*z, v = Vv[0]*x + Vv[1]*y + Vv[2]*z;
+    pu[i] = u; pv[i] = v; pd[i] = T[0]*x + T[1]*y + T[2]*z;
+    if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v;
+  }
+  const bw = u1 - u0, bh = v1 - v0;
+
+  // 2. depth map of the whole model (nearest surface per pixel), by scanline rasterising every triangle
+  const extent = Math.max(bw, bh, 1e-6);
+  const pxmm = Math.max(extent / 2400, 0.04);          // mm per pixel
+  const GW = Math.ceil(bw / pxmm) + 3, GH = Math.ceil(bh / pxmm) + 3;
+  const zbuf = new Float32Array(GW * GH).fill(-Infinity);
+  const gx = i => (pu[i] - u0) / pxmm + 1, gy = i => (v1 - pv[i]) / pxmm + 1;
+  const X = [0, 0, 0], Y = [0, 0, 0];
+  for (let tr = 0; tr < nTri; tr++){
+    const a = tris[3*tr], b = tris[3*tr+1], c = tris[3*tr+2];
+    const xa = gx(a), ya = gy(a), xb = gx(b), yb = gy(b), xc = gx(c), yc = gy(c);
+    const den = (yb - yc) * (xa - xc) + (xc - xb) * (ya - yc);
+    if (Math.abs(den) < 1e-9) continue;                // seen edge-on: covers no pixel
+    const inv = 1 / den, da = pd[a], db = pd[b], dc = pd[c];
+    const gX = ((yb - yc) * (da - dc) + (yc - ya) * (db - dc)) * inv;
+    const gY = ((xc - xb) * (da - dc) + (xa - xc) * (db - dc)) * inv;
+    X[0] = xa; X[1] = xb; X[2] = xc; Y[0] = ya; Y[1] = yb; Y[2] = yc;
+    const iy0 = Math.max(0, Math.ceil(Math.min(ya, yb, yc) - 0.5));
+    const iy1 = Math.min(GH - 1, Math.floor(Math.max(ya, yb, yc) - 0.5));
+    for (let iy = iy0; iy <= iy1; iy++){
+      const py = iy + 0.5;
+      let lo = Infinity, hi = -Infinity;
+      for (let e = 0; e < 3; e++){
+        const j = e === 2 ? 0 : e + 1, y1 = Y[e], y2 = Y[j];
+        if (y1 === y2 || py < Math.min(y1, y2) || py > Math.max(y1, y2)) continue;
+        const x = X[e] + (X[j] - X[e]) * (py - y1) / (y2 - y1);
+        if (x < lo) lo = x; if (x > hi) hi = x;
+      }
+      if (lo > hi) continue;
+      const ix0 = Math.max(0, Math.ceil(lo - 0.5)), ix1 = Math.min(GW - 1, Math.floor(hi - 0.5));
+      for (let ix = ix0; ix <= ix1; ix++){
+        const d = dc + gX * (ix + 0.5 - xc) + gY * (py - yc), k = iy * GW + ix;
+        if (d > zbuf[k]) zbuf[k] = d;
+      }
+    }
+  }
+
+  // an edge sample is hidden only when every pixel around it holds a surface nearer than the edge (by more than tol)
+  const tol = Math.max(0.15, pxmm * 1.5);
+  const visibleAt = (x, y, d) => {
+    const ix = Math.floor(x), iy = Math.floor(y);
+    let m = Infinity;
+    for (let dy = -1; dy <= 1; dy++){
+      for (let dx = -1; dx <= 1; dx++){
+        const jx = ix + dx, jy = iy + dy;
+        const v = (jx < 0 || jy < 0 || jx >= GW || jy >= GH) ? -Infinity : zbuf[jy * GW + jx];
+        if (v < m) m = v;
+      }
+    }
+    return !(d < m - tol);
   };
 
-  const raw = [];
-  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+  // 3. pick edges (type 1 = feature edge, 2 = silhouette / boundary), split each into visible and hidden runs
+  const segs = [];
   for (let i = 0; i < E; i++){
     const a = 3*f1[i];
     const fr1 = N[a]*t[0] + N[a+1]*t[1] + N[a+2]*t[2] > 1e-9;
-    let type = 0;
-    if (f2[i] < 0){
-      if (fr1) type = 2;
-      else if (cfg.showHidden) type = 3;
-    } else {
+    let type = 0, back = false;
+    if (f2[i] < 0) type = 2;
+    else {
       const b = 3*f2[i];
       const fr2 = N[b]*t[0] + N[b+1]*t[1] + N[b+2]*t[2] > 1e-9;
       if (fr1 !== fr2) type = 2;
-      else if (fr1){
-        if (cosD[i] < cfg.cosThr) type = 1;
-      } else if (cfg.showHidden) type = 3;
+      else if (cosD[i] < cfg.cosThr){ type = 1; back = !fr1; }
     }
     if (!type) continue;
-    const p = pr(ea[i]), q = pr(eb[i]);
-    raw.push({x1:p[0], y1:p[1], x2:q[0], y2:q[1], type});
-    u0 = Math.min(u0, p[0], q[0]); u1 = Math.max(u1, p[0], q[0]);
-    v0 = Math.min(v0, p[1], q[1]); v1 = Math.max(v1, p[1], q[1]);
+    if (back && !cfg.showHidden) continue;             // an edge of back faces only can show through nothing in a closed model
+    const A = ea[i], B = eb[i];
+    const xa = gx(A), ya = gy(A), da = pd[A], xb = gx(B), yb = gy(B), db = pd[B];
+    const n = Math.min(4000, Math.max(1, Math.ceil(Math.hypot(xb - xa, yb - ya))));
+    const vis = new Uint8Array(n);
+    for (let k = 0; k < n; k++){
+      const f = (k + 0.5) / n;
+      vis[k] = visibleAt(xa + (xb - xa) * f, ya + (yb - ya) * f, da + (db - da) * f) ? 1 : 0;
+    }
+    for (let k = 1; k < n - 1; k++) if (!vis[k] && vis[k-1] && vis[k+1]) vis[k] = 1;   // ignore one-sample gaps
+    let k0 = 0;
+    for (let k = 1; k <= n; k++){
+      if (k < n && vis[k] === vis[k0]) continue;
+      const rt = vis[k0] ? type : (cfg.showHidden ? 3 : 0);
+      if (rt){
+        const s0 = k0 / n, s1 = k / n;
+        segs.push({x1: pu[A] + (pu[B] - pu[A]) * s0 - u0, y1: v1 - (pv[A] + (pv[B] - pv[A]) * s0),
+                   x2: pu[A] + (pu[B] - pu[A]) * s1 - u0, y2: v1 - (pv[A] + (pv[B] - pv[A]) * s1), type: rt});
+      }
+      k0 = k;
+    }
   }
-  if (!raw.length) return null;
-  const segs = raw.map(g => ({x1: g.x1 - u0, y1: v1 - g.y1, x2: g.x2 - u0, y2: v1 - g.y2, type: g.type}));
-  return {name: vname, segs, bw: u1 - u0, bh: v1 - v0, lw: u1 - u0, lh: v1 - v0};
+  if (!segs.length) return null;
+  return {name: vname, segs, bw, bh, lw: bw, lh: bh};
 }
 
 // ---------- grid (millimetre paper or centimetre grid), in page coordinates ----------
@@ -938,7 +1007,7 @@ function update(){
     setHead(`<b>${esc(R.cfg.paperName)}</b> · ${layout} · pages: <b>${R.pages.length}</b> · triangles: ${mesh.nTri.toLocaleString("en-US")} · edges: ${R.edgesTotal.toLocaleString("en-US")}` + (R.autoNote ? `<span class="auto">${esc(R.autoNote)}</span>` : ""));
     const extra = [];
     if (R.notes.length) extra.push(R.notes.map(esc).join(". ") + ".");
-    if (R.cfg.showHidden) extra.push("Hidden lines are approximate: back-facing edges only.");
+    if (R.cfg.showHidden) extra.push("Hidden lines come from a depth map: very thin features can be missed.");
     setStatus(extra.join("<br>"), false);
     if (R.hint){
       $("hintText").textContent = R.hint.text;
