@@ -117,7 +117,15 @@ fieldset.grp button{justify-self:start}
 #donate[hidden]{display:none}
 #donate .txt{flex:1 1 360px}
 #donate p{margin:0 0 6px}
-#pwrap{flex:1 1 auto;min-height:0;overflow:auto;display:flex;background:var(--stage);border:1px solid var(--ink)}
+#stage{position:relative;flex:1 1 auto;min-height:0;display:flex}
+.busy{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:var(--stage);border:1px solid var(--ink)}
+.busy[hidden]{display:none}
+.spin{width:36px;height:36px;border:3px solid var(--ink);border-right-color:transparent;border-bottom-color:transparent;animation:spin2 1s linear infinite;will-change:transform}
+@keyframes spin2{to{transform:rotate(360deg)}}
+.bar{position:relative;width:220px;height:6px;border:1px solid var(--ink);overflow:hidden}
+.bar i{position:absolute;top:0;bottom:0;left:0;width:35%;background:var(--ink);animation:slide 1.2s ease-in-out infinite;will-change:transform}
+@keyframes slide{from{transform:translateX(-100%)}to{transform:translateX(290%)}}
+#pwrap{flex:1 1 auto;min-width:0;min-height:0;overflow:auto;display:flex;background:var(--stage);border:1px solid var(--ink)}
 #preview{margin:auto;display:flex;flex-direction:column;align-items:center;gap:12px;padding:12px}
 #preview .pg{flex:none;background:#fff;border:1px solid var(--ink)}
 .pg svg{display:block;width:100%;height:100%}
@@ -130,7 +138,8 @@ fieldset.grp button{justify-self:start}
 }
 /* phone: normal scrolling page */
 @media (max-width:759px){
-  #pwrap{flex:none;height:70vh;min-height:320px}
+  #stage{flex:none}
+  #pwrap{flex:1 1 auto;height:70vh;min-height:320px}
   .top>label.load{width:100%;max-width:100%}
   input[type=file]{width:100%;max-width:100%}
 }
@@ -244,7 +253,10 @@ fieldset.grp button{justify-self:start}
   <div id="status"></div>
   <div id="toast" role="status"></div>
   <div id="hint"><span id="hintText"></span><button id="hintBtn">Switch</button></div>
-  <div id="pwrap"><div id="preview"></div></div>
+  <div id="stage">
+    <div id="pwrap"><div id="preview"></div></div>
+    <div id="busy" class="busy" hidden><div class="spin"></div><div id="busyText" class="lbl">Loading</div><div class="bar"><i></i></div></div>
+  </div>
 </section>
 </main>
 
@@ -462,6 +474,8 @@ function computeView(vname, cfg){
   const pxmm = Math.max(extent / 2400, 0.04);          // mm per pixel
   const GW = Math.ceil(bw / pxmm) + 3, GH = Math.ceil(bh / pxmm) + 3;
   const zbuf = new Float32Array(GW * GH).fill(-Infinity);
+  const idbuf = new Int32Array(GW * GH).fill(-1);                 // nearest triangle per pixel
+  const pl0 = new Float64Array(nTri), plx = new Float64Array(nTri), ply = new Float64Array(nTri);   // depth plane of each triangle: pl0 + plx*x + ply*y
   const gx = i => (pu[i] - u0) / pxmm + 1, gy = i => (v1 - pv[i]) / pxmm + 1;
   const X = [0, 0, 0], Y = [0, 0, 0];
   for (let tr = 0; tr < nTri; tr++){
@@ -472,6 +486,7 @@ function computeView(vname, cfg){
     const inv = 1 / den, da = pd[a], db = pd[b], dc = pd[c];
     const gX = ((yb - yc) * (da - dc) + (yc - ya) * (db - dc)) * inv;
     const gY = ((xc - xb) * (da - dc) + (xa - xc) * (db - dc)) * inv;
+    pl0[tr] = dc - gX * xc - gY * yc; plx[tr] = gX; ply[tr] = gY;
     X[0] = xa; X[1] = xb; X[2] = xc; Y[0] = ya; Y[1] = yb; Y[2] = yc;
     const iy0 = Math.max(0, Math.ceil(Math.min(ya, yb, yc) - 0.5));
     const iy1 = Math.min(GH - 1, Math.floor(Math.max(ya, yb, yc) - 0.5));
@@ -488,24 +503,39 @@ function computeView(vname, cfg){
       const ix0 = Math.max(0, Math.ceil(lo - 0.5)), ix1 = Math.min(GW - 1, Math.floor(hi - 0.5));
       for (let ix = ix0; ix <= ix1; ix++){
         const d = dc + gX * (ix + 0.5 - xc) + gY * (py - yc), k = iy * GW + ix;
-        if (d > zbuf[k]) zbuf[k] = d;
+        if (d > zbuf[k]){ zbuf[k] = d; idbuf[k] = tr; }
       }
     }
   }
 
-  // an edge sample is hidden only when every pixel around it holds a surface nearer than the edge (by more than tol)
-  const tol = Math.max(0.15, pxmm * 1.5);
-  const visibleAt = (x, y, d) => {
-    const ix = Math.floor(x), iy = Math.floor(y);
-    let m = Infinity;
-    for (let dy = -1; dy <= 1; dy++){
-      for (let dx = -1; dx <= 1; dx++){
-        const jx = ix + dx, jy = iy + dy;
-        const v = (jx < 0 || jy < 0 || jx >= GW || jy >= GH) ? -Infinity : zbuf[jy * GW + jx];
-        if (v < m) m = v;
-      }
+  // fill one-pixel cracks between neighbouring triangles, so they cannot let hidden lines show through
+  for (let iy = 1; iy < GH - 1; iy++){
+    for (let ix = 1; ix < GW - 1; ix++){
+      const k = iy * GW + ix;
+      if (zbuf[k] !== -Infinity) continue;
+      const l = zbuf[k-1], r = zbuf[k+1], u = zbuf[k-GW], dn = zbuf[k+GW];
+      if (l > -Infinity && r > -Infinity){ const m = l >= r ? k - 1 : k + 1; zbuf[k] = zbuf[m]; idbuf[k] = idbuf[m]; }
+      else if (u > -Infinity && dn > -Infinity){ const m = u >= dn ? k - GW : k + GW; zbuf[k] = zbuf[m]; idbuf[k] = idbuf[m]; }
     }
-    return !(d < m - tol);
+  }
+  const tolBase = 0.1 + pxmm;
+  // a pixel votes "covered" when its nearest surface, evaluated exactly at the edge point, lies nearer than the edge (plane of that
+  // triangle, so steep surfaces need no slope tolerance)
+  const covers = (ix, iy, x, y, d) => {
+    if (ix < 0 || iy < 0 || ix >= GW || iy >= GH) return false;
+    const id = idbuf[iy * GW + ix];
+    if (id < 0) return false;
+    return pl0[id] + plx[id] * x + ply[id] * y > d + tolBase;
+  };
+  // an edge point is hidden when at least 3 of the 4 nearest depth pixels vote "covered"
+  const hiddenAt = (x, y, d) => {
+    const ix = Math.floor(x - 0.5), iy = Math.floor(y - 0.5);
+    let c = 0;
+    if (covers(ix, iy, x, y, d)) c++;
+    if (covers(ix + 1, iy, x, y, d)) c++;
+    if (covers(ix, iy + 1, x, y, d)) c++;
+    if (covers(ix + 1, iy + 1, x, y, d)) c++;
+    return c >= 3;
   };
 
   // 3. pick edges (type 1 = feature edge, 2 = silhouette / boundary), split each into visible and hidden runs
@@ -525,11 +555,11 @@ function computeView(vname, cfg){
     if (back && !cfg.showHidden) continue;             // an edge of back faces only can show through nothing in a closed model
     const A = ea[i], B = eb[i];
     const xa = gx(A), ya = gy(A), da = pd[A], xb = gx(B), yb = gy(B), db = pd[B];
-    const n = Math.min(4000, Math.max(1, Math.ceil(Math.hypot(xb - xa, yb - ya))));
+    const n = Math.min(6000, Math.max(1, Math.ceil(Math.hypot(xb - xa, yb - ya) / 0.75)));
     const vis = new Uint8Array(n);
     for (let k = 0; k < n; k++){
       const f = (k + 0.5) / n;
-      vis[k] = visibleAt(xa + (xb - xa) * f, ya + (yb - ya) * f, da + (db - da) * f) ? 1 : 0;
+      vis[k] = hiddenAt(xa + (xb - xa) * f, ya + (yb - ya) * f, da + (db - da) * f) ? 0 : 1;
     }
     for (let k = 1; k < n - 1; k++) if (!vis[k] && vis[k-1] && vis[k+1]) vis[k] = 1;   // ignore one-sample gaps
     let k0 = 0;
@@ -745,19 +775,75 @@ function buildAll(){
 // ---------- PDF output (vector, mm -> pt exact, one PDF page per paper page, always white paper) ----------
 function escPdf(s){ return s.replace(/[^\x20-\x7e]/g, "?").replace(/[\\()]/g, m => "\\" + m); }
 
+// join segments that share end points into polylines (fewer path operators, same drawing)
+function chainLines(list){
+  const key = (x, y) => Math.round(x * 100) + "," + Math.round(y * 100);   // 0.01 mm
+  const ends = new Map();
+  list.forEach((g, i) => {
+    for (const kk of [key(g.x1, g.y1), key(g.x2, g.y2)]){
+      if (!ends.has(kk)) ends.set(kk, []);
+      ends.get(kk).push(i);
+    }
+  });
+  const used = new Uint8Array(list.length), out = [];
+  const take = kk => {
+    const a = ends.get(kk);
+    if (!a) return -1;
+    while (a.length){ const i = a.pop(); if (!used[i]) return i; }
+    return -1;
+  };
+  for (let i = 0; i < list.length; i++){
+    if (used[i]) continue;
+    used[i] = 1;
+    const g = list[i], pts = [[g.x1, g.y1], [g.x2, g.y2]];
+    for (let side = 0; side < 2; side++){
+      for (;;){
+        const p = side === 0 ? pts[pts.length - 1] : pts[0];
+        const j = take(key(p[0], p[1]));
+        if (j < 0) break;
+        used[j] = 1;
+        const h = list[j];
+        const np = key(h.x1, h.y1) === key(p[0], p[1]) ? [h.x2, h.y2] : [h.x1, h.y1];
+        if (side === 0) pts.push(np); else pts.unshift(np);
+      }
+    }
+    out.push(pts);
+  }
+  return out;
+}
+
 function pageContent(P, k){
-  const f = n => n.toFixed(3);
-  const X = x => f(x*k), Y = y => f((P.H - y)*k);
+  const f = v => String(+v.toFixed(2));
+  const X = x => f(x * k), Y = y => f((P.H - y) * k);
   const parts = [];
-  for (const g of P.grid){
-    const st = GRID_STYLE[g.k];
-    parts.push(`${st.rg} RG ${f(st.w)} w ${X(g.x1)} ${Y(g.y1)} m ${X(g.x2)} ${Y(g.y2)} l S`);
+  // grid: one path per line class, stroked once
+  for (let c = 0; c < GRID_STYLE.length; c++){
+    const st = GRID_STYLE[c];
+    const own = P.grid.filter(g => g.k === c);
+    if (!own.length) continue;
+    parts.push(`${st.rg} RG ${st.w} w`);
+    for (const g of own) parts.push(`${X(g.x1)} ${Y(g.y1)} m ${X(g.x2)} ${Y(g.y2)} l`);
+    parts.push("S");
   }
   parts.push("0 0 0 RG 0 0 0 rg 1 J 1 j");
+  // drawing lines: group by width and dash, join end to end
+  const groups = new Map();
   for (const L of P.lines){
-    if (L.dash) parts.push(`[${f(DASH_ON*k)} ${f(DASH_OFF*k)}] 0 d`);
-    parts.push(`${f(L.w)} w ${X(L.x1)} ${Y(L.y1)} m ${X(L.x2)} ${Y(L.y2)} l S`);
-    if (L.dash) parts.push("[] 0 d");
+    const key = L.w + "|" + (L.dash ? 1 : 0);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(L);
+  }
+  for (const [key, list] of groups){
+    const [w, d] = key.split("|");
+    parts.push(`${f(+w)} w`);
+    if (d === "1") parts.push(`[${f(DASH_ON * k)} ${f(DASH_OFF * k)}] 0 d`);
+    let n = 0;
+    for (const path of chainLines(list)){
+      parts.push(`${X(path[0][0])} ${Y(path[0][1])} m ` + path.slice(1).map(p => `${X(p[0])} ${Y(p[1])} l`).join(" "));
+      if (++n % 500 === 0) parts.push("S");
+    }
+    parts.push("S");
+    if (d === "1") parts.push("[] 0 d");
   }
   for (const T of P.texts){
     if (T.rot) parts.push(`BT /F1 ${T.size} Tf 0 1 -1 0 ${X(T.x)} ${Y(T.y)} Tm (${escPdf(T.s)}) Tj ET`);
@@ -766,30 +852,49 @@ function pageContent(P, k){
   return parts.join("\n");
 }
 
-function toPDF(pages){
+// deflate (zlib) a string with the browser's CompressionStream
+async function deflateText(str){
+  const stream = new Blob([new TextEncoder().encode(str)]).stream().pipeThrough(new CompressionStream("deflate"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+// compress = false writes plain content streams (used for checks)
+async function toPDF(pages, compress = true){
   const k = 72 / 25.4;
   const f = n => n.toFixed(3);
+  const enc = new TextEncoder(), T = s => enc.encode(s);
+  const canZ = compress && typeof CompressionStream === "function";
   const n = pages.length;
   const fontObj = 3 + 2*n;
-  const objs = [];
-  objs.push("<< /Type /Catalog /Pages 2 0 R >>");
-  objs.push(`<< /Type /Pages /Kids [${pages.map((_, i) => (3 + 2*i) + " 0 R").join(" ")}] /Count ${n} >>`);
-  pages.forEach((P, i) => {
-    const contentObj = 4 + 2*i;
-    objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${f(P.W*k)} ${f(P.H*k)}] /Contents ${contentObj} 0 R /Resources << /Font << /F1 ${fontObj} 0 R >> >> >>`);
+  const objs = [];     // each object is a list of byte chunks
+  objs.push([T("<< /Type /Catalog /Pages 2 0 R >>")]);
+  objs.push([T(`<< /Type /Pages /Kids [${pages.map((_, i) => (3 + 2*i) + " 0 R").join(" ")}] /Count ${n} >>`)]);
+  for (let i = 0; i < n; i++){
+    const P = pages[i];
+    objs.push([T(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${f(P.W*k)} ${f(P.H*k)}] /Contents ${4 + 2*i} 0 R /Resources << /Font << /F1 ${fontObj} 0 R >> >> >>`)]);
     const content = pageContent(P, k);
-    objs.push(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
-  });
-  objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    if (canZ){
+      const z = await deflateText(content);
+      objs.push([T(`<< /Length ${z.length} /Filter /FlateDecode >>\nstream\n`), z, T("\nendstream")]);
+    } else {
+      const b = T(content);
+      objs.push([T(`<< /Length ${b.length} >>\nstream\n`), b, T("\nendstream")]);
+    }
+  }
+  objs.push([T("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")]);
 
-  let out = "%PDF-1.4\n";
+  const parts = [T("%PDF-1.4\n")];
+  let off = parts[0].length;
   const offs = [];
-  objs.forEach((o, i) => { offs.push(out.length); out += `${i+1} 0 obj\n${o}\nendobj\n`; });
-  const xref = out.length;
-  out += `xref\n0 ${objs.length+1}\n0000000000 65535 f \n`;
-  offs.forEach(o => { out += String(o).padStart(10, "0") + " 00000 n \n"; });
-  out += `trailer\n<< /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
-  return new Blob([out], {type: "application/pdf"});
+  objs.forEach((o, i) => {
+    offs.push(off);
+    for (const c of [T(`${i+1} 0 obj\n`), ...o, T("\nendobj\n")]){ parts.push(c); off += c.length; }
+  });
+  let tail = `xref\n0 ${objs.length+1}\n0000000000 65535 f \n`;
+  offs.forEach(o => { tail += String(o).padStart(10, "0") + " 00000 n \n"; });
+  tail += `trailer\n<< /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${off}\n%%EOF\n`;
+  parts.push(T(tail));
+  return new Blob(parts, {type: "application/pdf"});
 }
 
 // ---------- on-screen preview (same geometry, SVG in mm) ----------
@@ -805,9 +910,18 @@ function toSVG(P, dark){
   s += `<rect x="0" y="0" width="${P.W}" height="${P.H}" fill="${paperFill}"/>`;
   for (const g of P.grid)
     s += `<line x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}" stroke="${gridHex[g.k]}" stroke-width="${(GRID_STYLE[g.k].w*k).toFixed(3)}"/>`;
+  // drawing lines: group by width and dash, joined end to end so a dash pattern runs on along a whole line
+  const lineGroups = new Map();
   for (const L of P.lines){
-    const dash = L.dash ? ` stroke-dasharray="${DASH_ON} ${DASH_OFF}"` : "";
-    s += `<line x1="${L.x1.toFixed(3)}" y1="${L.y1.toFixed(3)}" x2="${L.x2.toFixed(3)}" y2="${L.y2.toFixed(3)}" stroke="${ink}" stroke-width="${(L.w*k).toFixed(3)}" stroke-linecap="round"${dash}/>`;
+    const key = L.w + "|" + (L.dash ? 1 : 0);
+    if (!lineGroups.has(key)) lineGroups.set(key, []);
+    lineGroups.get(key).push(L);
+  }
+  for (const [key, list] of lineGroups){
+    const [w, d] = key.split("|");
+    const dash = d === "1" ? ` stroke-dasharray="${DASH_ON} ${DASH_OFF}"` : "";
+    const dd = chainLines(list).map(pts => "M" + pts.map(p => p[0].toFixed(2) + " " + p[1].toFixed(2)).join("L")).join("");
+    s += `<path d="${dd}" fill="none" stroke="${ink}" stroke-width="${(+w * k).toFixed(3)}" stroke-linecap="round" stroke-linejoin="round"${dash}/>`;
   }
   for (const T of P.texts){
     const font = `font-size="${(T.size*k).toFixed(3)}" font-family="ui-monospace,Menlo,Consolas,monospace" fill="${T.warn ? "#d9472b" : ink}"`;
@@ -1024,22 +1138,35 @@ function update(){
   }
 }
 
+// ---------- progress overlay (spinner and bar run on the compositor, so they keep moving while the page works) ----------
+const frame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+function showBusy(msg){ $("busyText").textContent = msg; $("busy").hidden = false; }
+function hideBusy(){ $("busy").hidden = true; }
+
 // ---------- file loading (button or drag and drop) ----------
 async function loadFile(f){
   if (!f) return;
-  setStatus(`Reading ${esc(f.name)} ...`, false);
+  showBusy("Reading file");
   try {
+    await frame();
     const buf = await f.arrayBuffer();
-    mesh = parseSTL(buf);
-    mesh.name = f.name.replace(/\.stl$/i, "");
-    edges = buildEdges(mesh);
+    showBusy("Reading triangles"); await frame();
+    const m = parseSTL(buf);
+    m.name = f.name.replace(/\.stl$/i, "");
+    showBusy("Finding edges"); await frame();
+    const ed = buildEdges(m);
+    mesh = m; edges = ed;
+    showBusy("Drawing views"); await frame();
     applyLoadDefaults();
     update();
     track("load");
   } catch (err) {
     mesh = null; edges = null;
+    setHead("");
     setStatus("Error: " + esc(err.message), true);
     $("dl").disabled = true;
+  } finally {
+    hideBusy();
   }
 }
 
@@ -1120,10 +1247,12 @@ $("pwrap").addEventListener("wheel", e => {
   if (n !== sel.selectedIndex){ sel.selectedIndex = n; layoutPreview(); }
 }, {passive: false});
 
-$("dl").addEventListener("click", () => {
+$("dl").addEventListener("click", async () => {
+  showBusy("Making PDF");
   try {
+    await frame();
     const R = buildAll();
-    const blob = toPDF(R.pages);
+    const blob = await toPDF(R.pages);
     const suffix = R.views.join("-") + (R.combine ? "_combined" : "") + "_" + R.cfg.paperName.replace(/\s+/g, "");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -1136,6 +1265,8 @@ $("dl").addEventListener("click", () => {
     $("donate").hidden = false;     // shown after every download; Hide closes it until the next download
   } catch (e) {
     setStatus(esc(e.message), true);
+  } finally {
+    hideBusy();
   }
 });
 
